@@ -56,14 +56,6 @@ rqq.dispatch = ?func (x) : async* () {
     await service.call(x.id, x.some);
 };
 
-rqq.onError = ?func (x, Error.Error) {
-
-};
-
-rqq.onComplete = ?func (x) {
-
-};
-
 rqq.onDropped = ?func (x) {
 
 };
