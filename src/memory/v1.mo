@@ -13,13 +13,13 @@ module {
     public func new<A>() : MU.MemShell<Mem<A>> = MU.new<Mem<A>>(
             {
                 store = BTree.init<Nat64, Request<A>>(?32);
-                var next_id = 0;
+                var next_id = 0xFFFFFFFE;
             }
         );
 
     public type Request<A> = {
         payload : A;
         var retry : Nat;
-        var last_try : Nat64;
+        var next_try : Nat64;
     };
 }; 

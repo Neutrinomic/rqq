@@ -52,13 +52,13 @@ module {
 
         public func add(payload: A, priority: Nat32) : async () {
             let id = getNextId();
-            ignore BTree.insert<Nat64, VM.Request<A>>(mem.store, Nat64.compare, getIndex(id, priority), { payload = payload; var retry = 0; var last_try = 0 });
+            ignore BTree.insert<Nat64, VM.Request<A>>(mem.store, Nat64.compare, getIndex(id, priority), { payload = payload; var retry = 0; var next_try = 0 });
         };
 
         private func getNextId() : Nat32 {
             let id = mem.next_id;
-            mem.next_id += 1;
-            if (mem.next_id > 0xFFFFFFFE) mem.next_id := 0;
+            mem.next_id -= 1;
+            if (mem.next_id == 0) mem.next_id := 0xFFFFFFFE;
             id;
         };
 
@@ -73,11 +73,14 @@ module {
         };
 
         private func whenToRetry(request: VM.Request<A>) : Nat64 {
-            let last_try = request.last_try;
+            let now = Nat64.fromNat(Int.abs(Time.now()));
             let min_delay = settings.MIN_RETRY_DELAY_SEC * 1_000_000_000;
             let max_delay = settings.MAX_RETRY_DELAY_SEC * 1_000_000_000;
-            let delay = min_delay + (max_delay - min_delay) * Nat64.fromNat(request.retry);
-            last_try + delay;
+            let retry = Nat64.fromNat(request.retry);
+            let max_retries = Nat64.fromNat(settings.MAX_RETRIES);
+            let progress:Nat64 = if (max_retries == 0) 0 else retry * 1_000_000_000 / max_retries;
+            let delay = min_delay + ((max_delay - min_delay) * progress) / 1_000_000_000;
+            now + delay;
         };
 
         private func deleteMaxCondition(condition: (VM.Request<A>) -> Bool, last_tip: Nat64) : ?(Nat64,VM.Request<A>) {
@@ -101,7 +104,7 @@ module {
 
                 let now = Nat64.fromNat(Int.abs(Time.now()));
 
-                let max_condition : (VM.Request<A>) -> Bool = func(request) : Bool { request.last_try != 0 and (now < whenToRetry(request)) };
+                let max_condition : (VM.Request<A>) -> Bool = func(request) : Bool { request.next_try > now };
 
                 var last_tip : Nat64 = ^0;
                 label sendloop while (i < settings.MAX_PER_THREAD) { 
@@ -122,7 +125,7 @@ module {
 
                         // readd it to the queue, but with a lower id
                         request.retry += 1;
-                        request.last_try := now;
+                        request.next_try := whenToRetry(request);
                         ignore BTree.insert<Nat64, VM.Request<A>>(mem.store, Nat64.compare, deprioritizeIndex(id), request);
                     };
         
