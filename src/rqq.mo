@@ -13,7 +13,11 @@ import Option "mo:base/Option";
 
 module {
 
-    let VM = Ver1;
+    public module Mem {
+        public let V1 = Ver1;
+    };
+
+    let VM = Mem.V1;
 
     public type Settings = {
         THREAD_INTERVAL_SEC : Nat;
