@@ -1,0 +1,13 @@
+[package]
+name = "rqq"
+version = "1.0.0"
+description = ""
+repository = ""
+keywords = [ ]
+license = "MIT"
+
+[dependencies]
+mosup = "0.1.1"
+stableheapbtreemap = "1.5.0"
+base = "0.15.0"
+vector = "0.4.2"
