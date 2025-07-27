@@ -3,10 +3,14 @@ import { resolve } from 'node:path';
 import { Actor, PocketIc, createIdentity } from '@dfinity/pic';
 import { IDL } from '@dfinity/candid';
 import { _SERVICE as RQQTestService, idlFactory as RQQTestIdlFactory, init as rqqTestInit } from './build/rqq.idl.js';
+import { _SERVICE as AdvancedTestService, idlFactory as AdvancedTestIdlFactory, init as advancedTestInit } from './build/advanced.idl.js';
+import { _SERVICE as FinallyTestService, idlFactory as FinallyTestIdlFactory, init as finallyTestInit } from './build/finally.idl.js';
 //@ts-ignore
 import { toState } from "@infu/icblast";
 
 export const RQQ_TEST_WASM_PATH = resolve(__dirname, "./build/rqq.wasm");
+export const ADVANCED_TEST_WASM_PATH = resolve(__dirname, "./build/advanced.wasm");
+export const FINALLY_TEST_WASM_PATH = resolve(__dirname, "./build/finally.wasm");
 
 export { toState };
 
@@ -20,7 +24,32 @@ export async function CanRQQTest(pic: PocketIc) {
     return fixture;
 }
 
+export async function CanAdvancedTest(pic: PocketIc) {
+    const fixture = await pic.setupCanister<AdvancedTestService>({
+        idlFactory: AdvancedTestIdlFactory,
+        wasm: ADVANCED_TEST_WASM_PATH,
+        arg: IDL.encode(advancedTestInit({ IDL }), []),
+    });
+
+    return fixture;
+}
+
+export async function CanFinallyTest(pic: PocketIc) {
+    const fixture = await pic.setupCanister<FinallyTestService>({
+        idlFactory: FinallyTestIdlFactory,
+        wasm: FINALLY_TEST_WASM_PATH,
+        arg: IDL.encode(finallyTestInit({ IDL }), []),
+    });
+
+    return fixture;
+}
+
+
+
+
 export { RQQTestService, RQQTestIdlFactory, rqqTestInit };
+export { AdvancedTestService, AdvancedTestIdlFactory, advancedTestInit };
+export { FinallyTestService, FinallyTestIdlFactory, finallyTestInit };
 
 // Helper function to wait for time to pass in tests
 export async function passTime(pic: PocketIc, seconds: number) {

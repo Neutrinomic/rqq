@@ -10,7 +10,8 @@ import Nat "mo:base/Nat";
 import Iter "mo:base/Iter";
 import List "mo:base/List";
 import Option "mo:base/Option";
-import Debug "mo:base/Debug";
+import Dbg "mo:base/Debug";
+import Vector "mo:vector";
 
 module {
 
@@ -32,7 +33,7 @@ module {
     public let DefaultSettings : Settings = {
         THREAD_INTERVAL_SEC = 6;
         MAX_PER_THREAD = 10;
-        MAX_THREADS = 10;
+        MAX_THREADS = 20;
         MAX_RETRIES = 3;
         MIN_RETRY_DELAY_SEC = 6;
         MAX_RETRY_DELAY_SEC = 60;
@@ -49,9 +50,10 @@ module {
         public var onDropped : ?((A) -> ()) = null;
         public var dispatch : ?(A -> async* ()) = null;
 
-        public func add(payload: A, priority: Nat32) : async () {
+        public func add<system>(payload: A, priority: Nat32) : () {
             let id = getNextId();
             ignore BTree.insert<Nat64, VM.Request<A>>(mem.store, Nat64.compare, getIndex(id, priority), { payload = payload; var retry = 0; var next_try = 0; var error = null; });
+            if (not Thread.isRunning()) Thread.runnerStart<system>();
         };
 
         private func getNextId() : Nat32 {
@@ -60,7 +62,7 @@ module {
             if (mem.next_id == 0) mem.next_id := 0xFFFFFFFE;
             id;
         };
-
+    
         private func getIndex(id : Nat32, priority:Nat32) : Nat64 {
             Nat64.fromNat32(priority) << 32 | Nat64.fromNat32(id);
         };
@@ -91,103 +93,187 @@ module {
 
             var start :Nat64 = last_tip;
             label search_out loop {
-                let resp = BTree.scanLimit<Nat64, VM.Request<A>>(mem.store, Nat64.compare, 0, start, #bwd, 10);
+                let resp = BTree.scanLimit<Nat64, VM.Request<A>>(mem.store, Nat64.compare, 0, start, #bwd, 30);
                 
                 label search_in for ((id, request) in resp.results.vals()) {
                     if (not condition(request)) continue search_in;
-                    ignore BTree.delete(mem.store, Nat64.compare, id);
+                     ignore BTree.delete(mem.store, Nat64.compare, id);
                     return ?(id, request);
                 };
+
+                if (resp.nextKey == null) break search_out;
                 ignore do ? { start := resp.nextKey! };
-                if (resp.results.size() < 10) return null;
             };
             null;
         };
 
         private func dispatchThread() : async () {
-     
-                var i = 0;
+             
                 let ?dispatchFn = dispatch else return;
                 let now = Nat64.fromNat(Int.abs(Time.now()));
 
                 let max_condition : (VM.Request<A>) -> Bool = func(request) : Bool { request.next_try < now };
 
                 var last_tip : Nat64 = ^0;
-                label sendloop while (i < settings.MAX_PER_THREAD) { 
+                
 
-                    let ?(id, request) = deleteMaxCondition(max_condition, last_tip) else break sendloop;
+
+                label sendloop for (i in Iter.range(0, settings.MAX_PER_THREAD)) { 
+                    let ?(id, request) = deleteMaxCondition(max_condition, last_tip) else return;
                     last_tip := id;
+                    let status = {var success = false; var caught = false;};
                     try {
                         await* dispatchFn(request.payload);
                         request.error := null;
-                        
+                        mem.total_processed += 1;
+                        status.success := true;
                     } catch (e) {
                         request.error := ?Error.message(e);
+                        mem.total_errors += 1;
                         if (request.retry > settings.MAX_RETRIES) { 
                             ignore BTree.insert<Nat64, VM.Request<A>>(mem.dropped, Nat64.compare, id, request);
-                           
+                            mem.total_dropped += 1;
                             ignore do ? {onDropped!(request.payload)};
                             continue sendloop;
                         };
 
-                        // readd it to the queue, but with a lower id
                         request.retry += 1;
                         request.next_try := whenToRetry(request);
                         ignore BTree.insert<Nat64, VM.Request<A>>(mem.store, Nat64.compare,  deprioritizeIndex(id), request);
+                        status.caught := true;
+                    } finally {
+                        if (not status.success and not status.caught) {
+                            request.error := ?("Uncachable error in dispatch code");
+                            mem.total_errors += 1;
+                            mem.total_dropped += 1;
+                            ignore BTree.insert<Nat64, VM.Request<A>>(mem.dropped, Nat64.compare, id, request);
+                        };
+
                     };
-        
+                };
+
+        };
+
+
+        var thread_runner :Bool = false;
+        var threads : Nat = 0;
+
+        module Thread {
+
+
+            public func isRunning() : Bool {
+                thread_runner;
+            };
+
+            public func runnerStart<system>() : () {
+                thread_runner := true;
+                ignore Timer.setTimer<system>( #seconds(0), run );
+            };
+
+            public func runnerStop() : () {
+                thread_runner := false;
+            };
+
+            public func run<system>() : async () {
+                
+                let number_of_requests = BTree.size(mem.store);
+                let desired_threads = Nat.min((number_of_requests + settings.MAX_PER_THREAD - 1) / settings.MAX_PER_THREAD, settings.MAX_THREADS);
+                if (desired_threads == 0) {
+                    threads := 0;
+                    thread_runner := false;
+                    return;
+                };
+                threads := desired_threads;
+                var i = 0;
+
+                var running = List.nil<() -> async ()>();
+                while (i < desired_threads) {
+                    try {
+                        running := List.push(dispatchThread, running);
+                    } catch (e) {
+                        Dbg.print("Uncachable error promise! " # Error.message(e));
+                    };
                     i += 1;
                 };
 
-                manageThreads<system>();
-        };
 
-        var threads = List.nil<Nat>();
-
-        private func manageThreads<system>() : () {
-            let number_of_requests = BTree.size(mem.store);
-            let desired_threads = Nat.min(1, Nat.max(number_of_requests / (2*settings.MAX_PER_THREAD), settings.MAX_THREADS));
-            let current_threads = List.size(threads);
-
-            if (desired_threads > current_threads) {
-                for (i in Iter.range(current_threads, desired_threads - 1)) {
-                    let thread_id = Timer.recurringTimer<system>( #seconds(settings.THREAD_INTERVAL_SEC), dispatchThread );
-                    threads := List.push(thread_id, threads);
-                }
-            } else if (desired_threads < current_threads) {
-                for (i in Iter.range(current_threads, desired_threads - 1)) {
-                    let (opt_thread_id, new_threads) = List.pop(threads);
-                    threads := new_threads;
-                    ignore do ? {Timer.cancelTimer(opt_thread_id!)};
-                }
+                // Wait all in parallel
+                for (fn in List.toIter(running)) {
+                    try {
+                        await fn();
+                    } catch (e) {
+                        Dbg.print("Uncachable error! " # Error.message(e));
+                    };
+                };
+             
+                // Loop
+                ignore Timer.setTimer<system>( #seconds(1), run );
             };
 
-            
+      
+
+         };
+
+
+        public module Debug {
+                public type Stats = {
+                    requests: Nat;
+                    threads: Nat;
+                    dropped: Nat;
+                    total_processed: Nat;
+                    total_dropped: Nat;
+                    total_errors: Nat;
+                };
+
+                public func getStats() : Stats {
+                    {
+                        requests = BTree.size(mem.store);
+                        threads = threads;
+                        dropped = BTree.size(mem.dropped);
+                        total_processed = mem.total_processed;
+                        total_dropped = mem.total_dropped;
+                        total_errors = mem.total_errors;
+                    };
+                };
+
+
+                public type Dropped<A> = {
+                    dropped : [(Nat64, VM.Request<A>)];
+                    next_key : ?Nat64;
+                    total : Nat;
+                };
+
+                public func getDropped(from : Nat64, limit : Nat) : Dropped<A> {
+                    let len = Nat.max(limit, 1000);
+                    let resp = BTree.scanLimit<Nat64, VM.Request<A>>(mem.dropped, Nat64.compare, from, 0, #fwd, len);
+                    {
+                        dropped = resp.results;
+                        next_key = resp.nextKey;
+                        total = BTree.size(mem.dropped);
+                    };
+                };
+
+                public type Requests<A> = {
+                    requests : [(Nat64, VM.Request<A>)];
+                    next_key : ?Nat64;  
+                    total : Nat;
+                };
+
+                public func getRequests(from : Nat64, limit : Nat) : Requests<A> {
+                    let resp = BTree.scanLimit<Nat64, VM.Request<A>>(mem.store, Nat64.compare, from, 0, #fwd, limit);
+                    {
+                        requests = resp.results;
+                        next_key = resp.nextKey;
+                        total = BTree.size(mem.store);
+                    };
+                };
+
+                public func clearDropped() {
+                    BTree.clear(mem.dropped);
+                };
+
         };
 
-        manageThreads<system>();
-
-        public type Dropped<A> = {
-            dropped : [(Nat64, VM.Request<A>)];
-            next_key : ?Nat64;
-            total : Nat;
-        };
-
-        public func getDropped(from : Nat64, limit : Nat) : Dropped<A> {
-            let len = Nat.max(limit, 1000);
-            let resp = BTree.scanLimit<Nat64, VM.Request<A>>(mem.dropped, Nat64.compare, from, 0, #fwd, len);
-            {
-                dropped = resp.results;
-                next_key = resp.nextKey;
-                total = BTree.size(mem.dropped);
-            };
-        };
-
-
-
-        public func clearDropped() {
-            BTree.clear(mem.dropped);
-        };
 
       
     };

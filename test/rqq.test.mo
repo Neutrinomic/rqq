@@ -14,9 +14,17 @@ actor RQQTest {
         var failureCount: Nat;
     };
 
+    // Shareable version without var fields
+    public type TestPayloadShared = {
+        id: Nat32;
+        data: Text;
+        shouldFail: Bool;
+        failureCount: Nat;
+    };
+
     // RQQ setup (now only takes one type parameter)
     let mem = RQQ.Mem.V1.new<TestPayload>();
-    let rqq = RQQ.RQQ(mem, null);
+    let rqq = RQQ.RQQ<system, TestPayload>(mem, null);
 
     // Track processed requests for testing
     private stable var processedRequests : [Nat32] = [];
@@ -57,7 +65,7 @@ actor RQQTest {
             shouldFail = shouldFail;
             var failureCount = failureCount;
         };
-        await rqq.add(payload, priority);
+        rqq.add(payload, priority);
     };
 
     public query func getProcessedRequests() : async [Nat32] {
@@ -82,6 +90,5 @@ actor RQQTest {
         processedRequests := [];
         dispatchCallCount := 0;
         droppedRequests := [];
-        rqq.clearDropped();
     };
 } 
