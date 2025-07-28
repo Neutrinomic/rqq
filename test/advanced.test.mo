@@ -2,7 +2,7 @@ import Time "mo:base/Time";
 import Debug "mo:base/Debug";
 import Array "mo:base/Array";
 import Error "mo:base/Error";
-import RQQ "../src/rqq";
+import RQQ "../src";
 import Iter "mo:base/Iter";
 
 actor RQQTest {

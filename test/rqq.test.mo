@@ -2,9 +2,9 @@ import Time "mo:base/Time";
 import Debug "mo:base/Debug";
 import Array "mo:base/Array";
 import Error "mo:base/Error";
-import RQQ "../src/rqq";
+import RQQ "../src";
 
-actor RQQTest {
+persistent actor RQQTest {
 
     // Test payload types
     public type TestPayload = {
@@ -23,15 +23,15 @@ actor RQQTest {
     };
 
     // RQQ setup (now only takes one type parameter)
-    let mem = RQQ.Mem.V1.new<TestPayload>();
-    let rqq = RQQ.RQQ<system, TestPayload>(mem, null);
+    transient let mem = RQQ.Mem.V1.new<TestPayload>();
+    transient let rqq = RQQ.RQQ<system, TestPayload>(mem, null);
 
     // Track processed requests for testing
     private stable var processedRequests : [Nat32] = [];
     private stable var dispatchCallCount : Nat = 0;
     private stable var droppedRequests : [TestPayload] = [];
 
-    let some = actor("nzsmr-6iaaa-aaaal-qsnea-cai") : actor {
+    transient let some = actor("nzsmr-6iaaa-aaaal-qsnea-cai") : actor {
         non_existent : () -> async ()
     };
 

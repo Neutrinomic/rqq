@@ -12,6 +12,7 @@ import List "mo:base/List";
 import Option "mo:base/Option";
 import Dbg "mo:base/Debug";
 import Vector "mo:vector";
+import Array "mo:base/Array";
 
 module {
 
@@ -20,6 +21,9 @@ module {
     };
 
     let VM = Mem.V1;
+
+
+
 
     public type Settings = {
         THREAD_INTERVAL_SEC : Nat;
@@ -236,31 +240,50 @@ module {
 
 
                 public type Dropped<A> = {
-                    dropped : [(Nat64, VM.Request<A>)];
+                    dropped : [(Nat64, RequestShared<A>)];
                     next_key : ?Nat64;
                     total : Nat;
                 };
 
                 public func getDropped(from : Nat64, limit : Nat) : Dropped<A> {
                     let len = Nat.max(limit, 1000);
-                    let resp = BTree.scanLimit<Nat64, VM.Request<A>>(mem.dropped, Nat64.compare, from, 0, #fwd, len);
+                    let resp = BTree.scanLimit<Nat64, VM.Request<A>>(mem.dropped, Nat64.compare, from, ^0, #fwd, len);
                     {
-                        dropped = resp.results;
+                        dropped = Array.map<(Nat64, VM.Request<A>), (Nat64, RequestShared<A>)>(resp.results, func(x) {
+                            (x.0, {
+                                payload = x.1.payload;
+                                retry = x.1.retry;
+                                next_try = x.1.next_try;
+                                error = x.1.error;
+                            });
+                        });
                         next_key = resp.nextKey;
                         total = BTree.size(mem.dropped);
                     };
                 };
-
+                public type RequestShared<A> = {
+                    payload : A;
+                    retry : Nat;
+                    next_try : Nat64;
+                    error : ?Text;
+                };
                 public type Requests<A> = {
-                    requests : [(Nat64, VM.Request<A>)];
+                    requests : [(Nat64, RequestShared<A>)];
                     next_key : ?Nat64;  
                     total : Nat;
                 };
 
                 public func getRequests(from : Nat64, limit : Nat) : Requests<A> {
-                    let resp = BTree.scanLimit<Nat64, VM.Request<A>>(mem.store, Nat64.compare, from, 0, #fwd, limit);
+                    let resp = BTree.scanLimit<Nat64, VM.Request<A>>(mem.store, Nat64.compare, from, ^0, #fwd, limit);
                     {
-                        requests = resp.results;
+                        requests = Array.map<(Nat64, VM.Request<A>), (Nat64, RequestShared<A>)>(resp.results, func(x) {
+                            (x.0, {
+                                payload = x.1.payload;
+                                retry = x.1.retry;
+                                next_try = x.1.next_try;
+                                error = x.1.error;
+                            });
+                        });
                         next_key = resp.nextKey;
                         total = BTree.size(mem.store);
                     };

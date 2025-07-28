@@ -1,6 +1,6 @@
 [package]
 name = "rqq"
-version = "0.1.0"
+version = "0.1.1"
 description = "Retryable Priority Request Queue in Motoko"
 repository = "https://github.com/Neutrinomic/rqq"
 keywords = [ ]
