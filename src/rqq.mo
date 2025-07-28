@@ -116,8 +116,6 @@ module {
 
                 var last_tip : Nat64 = ^0;
                 
-
-
                 label sendloop for (i in Iter.range(0, settings.MAX_PER_THREAD)) { 
                     let ?(id, request) = deleteMaxCondition(max_condition, last_tip) else return;
                     last_tip := id;
